@@ -6,8 +6,9 @@ Background tool for Windows. It takes a screenshot when you press a hotkey, send
 
 ```powershell
 pip install -r requirements.txt
-ollama pull MichelRosselli/bonsai-27b
 ```
+
+If the model isn't installed, it downloads automatically (about 4.4 GB) the first time the program starts. If you press `Ctrl+Shift+X` while it is still downloading, the popup shows the download progress. You can also download it yourself first with `ollama pull MichelRosselli/bonsai-27b`.
 
 ## Run
 

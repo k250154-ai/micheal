@@ -128,6 +128,41 @@ def model_installed():
     return any(n == MODEL or n.split(":")[0] == MODEL for n in names)
 
 
+def pull_model(on_progress=None):
+    """Download the model via Ollama's /api/pull, reporting progress text."""
+    log.info("model %s not installed, downloading", MODEL)
+    req = urllib.request.Request(
+        OLLAMA_URL + "/api/pull",
+        data=json.dumps({"model": MODEL, "stream": True}).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    last_logged = -10
+    with urllib.request.urlopen(req, timeout=300) as resp:
+        for line in resp:
+            if not line.strip():
+                continue
+            msg = json.loads(line.decode())
+            if "error" in msg:
+                raise RuntimeError(f"Model download failed: {msg['error']}")
+            status = msg.get("status", "")
+            total, done = msg.get("total"), msg.get("completed")
+            if total and done is not None:
+                pct = int(done * 100 / total)
+                text = f"{status} {pct}% ({done / 1e9:.2f}/{total / 1e9:.2f} GB)"
+                if pct >= last_logged + 10:
+                    log.info("pull: %s", text)
+                    last_logged = pct
+            else:
+                text = status
+                log.info("pull: %s", status)
+            if on_progress:
+                on_progress(text)
+    if not model_installed():
+        raise RuntimeError("Model download finished but the model is not listed.")
+    log.info("model %s downloaded", MODEL)
+
+
 def preload_model():
     """Load the model into memory and keep it there so answers come faster."""
     try:
@@ -241,7 +276,9 @@ class App:
         self.popup = Popup(self.root)
         self.events = queue.Queue()
         self.busy = threading.Lock()
+        self.init_lock = threading.Lock()
         self.ready = False
+        self.pull_status = None  # text while the model is downloading
 
     # called from the keyboard hook thread -> just enqueue
     def on_capture(self):
@@ -295,6 +332,13 @@ class App:
 
     def _worker(self, img_b64):
         try:
+            if self.pull_status is not None:
+                self.events.put((
+                    "error",
+                    f"Model is still downloading:\n{self.pull_status}\n\n"
+                    "Press Ctrl+Shift+X again when it finishes.",
+                ))
+                return
             if not self.ready:
                 self.startup_checks()
             t0 = time.time()
@@ -308,11 +352,22 @@ class App:
             self.busy.release()
 
     def startup_checks(self):
-        if not ensure_ollama_server():
-            raise RuntimeError("Ollama server is not running and could not be started.")
-        if not model_installed():
-            raise RuntimeError(f"Model not found. Run:  ollama pull {MODEL}")
-        self.ready = True
+        with self.init_lock:  # only one thread starts the server / downloads
+            if self.ready:
+                return
+            if not ensure_ollama_server():
+                raise RuntimeError(
+                    "Ollama server is not running and could not be started.")
+            if not model_installed():
+                self.pull_status = "starting download..."
+                try:
+                    pull_model(self._set_pull_status)
+                finally:
+                    self.pull_status = None
+            self.ready = True
+
+    def _set_pull_status(self, text):
+        self.pull_status = text
 
     def background_init(self):
         try:
