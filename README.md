@@ -20,6 +20,13 @@ Double-click `start.bat`, or run `pythonw mcq_helper.py`. Nothing appears on scr
 | `Ctrl+Shift+Z` | Hide the popup. The program keeps running |
 | `Ctrl+Shift+Q` | Quit |
 
+A small notification in the bottom-right corner tells you what the program is doing:
+
+- On start: "MCQ Helper is running in the background", with the hotkey list
+- While the model loads or downloads: loading message or download progress, then "Model ready"
+- After `Ctrl+Shift+X`: "Screenshot taken · Thinking… 5s", with a live timer until the answer appears
+- On `Ctrl+Shift+Q`: "MCQ Helper stopped"
+
 Logs and errors are written to `mcq_helper.log`.
 
 ## Config

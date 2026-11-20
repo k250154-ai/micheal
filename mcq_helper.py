@@ -268,12 +268,64 @@ class Popup:
         return self.win.state() != "withdrawn"
 
 
+class Toast:
+    """Small status notification in the bottom-right corner."""
+
+    BG = "#1b1f24"
+    FG = "#e8eaed"
+    ACCENT = "#81c995"
+
+    def __init__(self, root):
+        self.root = root
+        self._hide_job = None
+        self.win = tk.Toplevel(root)
+        self.win.withdraw()
+        self.win.overrideredirect(True)
+        self.win.attributes("-topmost", True)
+        self.win.attributes("-alpha", 0.92)
+        self.win.configure(bg=self.ACCENT)
+        self.label = tk.Label(
+            self.win, bg=self.BG, fg=self.FG, justify="left", anchor="w",
+            font=("Segoe UI", 9), padx=12, pady=8, wraplength=320,
+        )
+        self.label.pack(padx=(4, 0), pady=0, fill="both")  # green bar on left
+
+    def show(self, text, duration_ms=None):
+        """Show `text`; auto-hide after duration_ms (None = stay)."""
+        if self._hide_job:
+            self.root.after_cancel(self._hide_job)
+            self._hide_job = None
+        self.label.config(text=text)
+        self.win.update_idletasks()
+        w, h = self.win.winfo_reqwidth(), self.win.winfo_reqheight()
+        sw, sh = self.win.winfo_screenwidth(), self.win.winfo_screenheight()
+        self.win.geometry(f"+{sw - w - 20}+{sh - h - 70}")  # above taskbar
+        self.win.deiconify()
+        self.win.lift()
+        self.win.attributes("-topmost", True)
+        if duration_ms:
+            self._hide_job = self.root.after(duration_ms, self.hide)
+
+    def hide(self):
+        if self._hide_job:
+            self.root.after_cancel(self._hide_job)
+            self._hide_job = None
+        self.win.withdraw()
+
+    @property
+    def visible(self):
+        return self.win.state() != "withdrawn"
+
+
 # -------------------------------------------------------------------- app
 class App:
     def __init__(self):
         self.root = tk.Tk()
         self.root.withdraw()
         self.popup = Popup(self.root)
+        self.toast = Toast(self.root)
+        self.thinking_since = None
+        self._last_pull_toast = 0.0
         self.events = queue.Queue()
         self.busy = threading.Lock()
         self.init_lock = threading.Lock()
@@ -298,10 +350,14 @@ class App:
                     self.start_capture()
                 elif kind == "hide":
                     self.popup.hide()
-                elif kind == "answer":
-                    self.popup.show("Answer", data)
-                elif kind == "error":
-                    self.popup.show("Error", data)
+                elif kind in ("answer", "error"):
+                    self.thinking_since = None
+                    self.toast.hide()
+                    self.popup.show("Answer" if kind == "answer" else "Error", data)
+                elif kind == "toast":
+                    text, duration = data
+                    if self.thinking_since is None:  # don't hide the timer
+                        self.toast.show(text, duration)
                 elif kind == "quit":
                     self.shutdown()
                     return
@@ -312,10 +368,11 @@ class App:
     def start_capture(self):
         if not self.busy.acquire(blocking=False):
             log.info("busy, ignoring hotkey")
-            return
-        # Hide our own popup so it is not in the screenshot.
-        was_visible = self.popup.visible
+            return  # the thinking timer is already on screen
+        # Hide our own windows so they are not in the screenshot.
+        was_visible = self.popup.visible or self.toast.visible
         self.popup.hide()
+        self.toast.hide()
         self.root.update()
         delay = 150 if was_visible else 0
         self.root.after(delay, self._grab_and_ask)
@@ -328,7 +385,18 @@ class App:
             self.busy.release()
             self.events.put(("error", f"Screenshot failed: {e}"))
             return
+        self.thinking_since = time.time()
+        self._tick_thinking()
         threading.Thread(target=self._worker, args=(img_b64,), daemon=True).start()
+
+    def _tick_thinking(self):
+        """Update the 'thinking' toast once a second until the answer arrives."""
+        if self.thinking_since is None:
+            return
+        secs = int(time.time() - self.thinking_since)
+        dots = "." * (secs % 3 + 1)
+        self.toast.show(f"\U0001F4F8  Screenshot taken\nThinking{dots}  {secs}s")
+        self.root.after(1000, self._tick_thinking)
 
     def _worker(self, img_b64):
         try:
@@ -368,26 +436,52 @@ class App:
 
     def _set_pull_status(self, text):
         self.pull_status = text
+        now = time.time()
+        if now - self._last_pull_toast >= 1:  # at most one update per second
+            self._last_pull_toast = now
+            self.toast_async(f"⬇  Downloading model\n{text}")
+
+    def toast_async(self, text, duration_ms=None):
+        """Show a toast from any thread."""
+        self.events.put(("toast", (text, duration_ms)))
 
     def background_init(self):
         try:
+            if not self.ready and ollama_running() and not model_installed():
+                self.toast_async("⬇  Model not found, starting download...")
             self.startup_checks()
+            self.toast_async("⏳  Loading model into memory...")
             preload_model()
+            self.toast_async("✅  Model ready. Press Ctrl+Shift+X", 3000)
         except Exception as e:
             log.error("startup: %s", e)
+            self.toast_async(f"⚠  Startup problem:\n{e}", 6000)
 
     def shutdown(self):
         log.info("quitting")
         keyboard.unhook_all()
-        self.root.destroy()
+        self.thinking_since = None
+        self.popup.hide()
+        self.toast.show("MCQ Helper stopped")
+        self.root.after(1200, self.root.destroy)
 
     def run(self):
         keyboard.add_hotkey(HOTKEY_CAPTURE, self.on_capture, suppress=False)
         keyboard.add_hotkey(HOTKEY_HIDE, self.on_hide, suppress=False)
         keyboard.add_hotkey(HOTKEY_QUIT, self.on_quit, suppress=False)
-        threading.Thread(target=self.background_init, daemon=True).start()
+        # Start loading after the startup toast so its hotkey list stays readable.
+        self.root.after(
+            4000,
+            lambda: threading.Thread(target=self.background_init, daemon=True).start(),
+        )
         log.info("running; %s capture, %s hide, %s quit",
                  HOTKEY_CAPTURE, HOTKEY_HIDE, HOTKEY_QUIT)
+        self.toast.show(
+            "✅  MCQ Helper is running in the background\n"
+            "Ctrl+Shift+X  answer   •   Ctrl+Shift+Z  hide   •   "
+            "Ctrl+Shift+Q  quit",
+            4000,
+        )
         self.root.after(50, self.poll)
         self.root.mainloop()
 
