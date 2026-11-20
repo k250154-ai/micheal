@@ -2,17 +2,29 @@
 
 Background tool for Windows. It takes a screenshot when you press a hotkey, sends it to a local Ollama vision model (`MichelRosselli/bonsai-27b`), and shows the answer in a small popup. Each answer is the option letter plus a 2-line explanation. The prompt is tuned for computer architecture and Irvine x86 MASM assembly.
 
-## Setup
+## Install on a new PC
 
-```powershell
-pip install -r requirements.txt
-```
+1. **Install Python 3.10 or newer** from <https://www.python.org/downloads/>.
+   On the first installer screen, tick **"Add python.exe to PATH"**. Keep the default options, which include tcl/tk.
+2. **Install Ollama** from <https://ollama.com/download>, or run `winget install Ollama.Ollama`.
+3. **Get this folder** onto the PC: `git clone https://github.com/nabeelali0707/micheal.git`, or on GitHub click **Code → Download ZIP** and unzip it.
+4. **Double-click `setup.bat`.** It checks Python, tkinter and Ollama, installs the Python packages (`keyboard`, `pillow`) and offers to download the model (about 4.4 GB). Fix anything it marks with `[X]`, then run it again.
+5. **Double-click `start.bat`.** A message in the bottom-right corner says it is running.
 
-If the model isn't installed, it downloads automatically (about 4.4 GB) the first time the program starts. If you press `Ctrl+Shift+X` while it is still downloading, the popup shows the download progress. You can also download it yourself first with `ollama pull MichelRosselli/bonsai-27b`.
+The model needs about 6 GB of free RAM (or VRAM). On a weak laptop, the first answer can take a minute or more.
+
+## Troubleshooting
+
+- **Nothing happens after `start.bat`:** double-click `debug.bat`. It runs the program with a console window so you can see the error, and prints the end of `mcq_helper.log`.
+- **"MCQ Helper is already running":** a copy is already in the background. Press `Ctrl+Shift+Q` to stop it, then start again.
+- **"Missing Python package":** run `setup.bat`.
+- **Hotkeys don't work in one particular app:** that app is probably running as Administrator. Right-click `start.bat` → *Run as administrator*.
+- **"Ollama is not installed" / "server not running":** install Ollama, or open the Ollama app once, then try again.
+- **`python` opens the Microsoft Store:** Python isn't really installed. Do step 1, and turn off the Store aliases under *Settings → Apps → Advanced app settings → App execution aliases*.
 
 ## Run
 
-Double-click `start.bat`, or run `pythonw mcq_helper.py`. Nothing appears on screen. The program waits in the background and loads the model at startup.
+Double-click `start.bat`, or run `pythonw mcq_helper.py`. The program runs in the background and loads the model at startup. If the model is missing, it downloads automatically.
 
 | Hotkey | Action |
 | --- | --- |
@@ -27,7 +39,7 @@ A small notification in the bottom-right corner tells you what the program is do
 - After `Ctrl+Shift+X`: "Screenshot taken · Thinking… 5s", with a live timer until the answer appears
 - On `Ctrl+Shift+Q`: "MCQ Helper stopped"
 
-Logs and errors are written to `mcq_helper.log`.
+Logs and errors are written to `mcq_helper.log`. If the program crashes, a message box shows the error.
 
 ## Config
 

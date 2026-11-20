@@ -23,12 +23,50 @@ import subprocess
 import sys
 import threading
 import time
-import tkinter as tk
+import traceback
 import urllib.error
 import urllib.request
 
-import keyboard
-from PIL import ImageGrab
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_FILE = os.path.join(BASE_DIR, "mcq_helper.log")
+
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+log = logging.getLogger("mcq")
+
+
+def fatal(msg):
+    """Log and show a Windows message box (pythonw has no console)."""
+    log.error(msg)
+    try:
+        ctypes.windll.user32.MessageBoxW(None, msg, "MCQ Helper", 0x10)
+    except Exception:
+        print(msg, file=sys.stderr)
+    sys.exit(1)
+
+
+def _excepthook(exc_type, exc, tb):
+    fatal("MCQ Helper crashed:\n\n" + "".join(
+        traceback.format_exception(exc_type, exc, tb))[-1500:])
+
+
+sys.excepthook = _excepthook
+
+try:
+    import tkinter as tk
+except ImportError:
+    fatal("tkinter is missing.\n\nReinstall Python from python.org and keep "
+          "'tcl/tk and IDLE' ticked in the installer options.")
+
+try:
+    import keyboard
+    from PIL import ImageGrab
+except ImportError as e:
+    fatal(f"Missing Python package: {e.name}\n\nRun setup.bat (or: "
+          f"python -m pip install -r requirements.txt) and start again.")
 
 # ----------------------------------------------------------------- settings
 MODEL = "MichelRosselli/bonsai-27b"
@@ -55,16 +93,6 @@ SYSTEM_PROMPT = (
     "Do not repeat the question. Do not add an introduction or conclusion."
 )
 USER_PROMPT = "Answer the MCQs in this screenshot."
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LOG_FILE = os.path.join(BASE_DIR, "mcq_helper.log")
-
-logging.basicConfig(
-    filename=LOG_FILE,
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
-)
-log = logging.getLogger("mcq")
 
 # Make screenshots use real pixels on scaled (125%/150%) displays.
 try:
@@ -97,13 +125,23 @@ def ollama_running():
         return False
 
 
+def find_ollama():
+    """ollama.exe on PATH, or in its default install folder."""
+    exe = shutil.which("ollama")
+    if exe:
+        return exe
+    default = os.path.join(os.environ.get("LOCALAPPDATA", ""),
+                           "Programs", "Ollama", "ollama.exe")
+    return default if os.path.isfile(default) else None
+
+
 def ensure_ollama_server():
     """Start `ollama serve` hidden if no server is reachable."""
     if ollama_running():
         return True
-    exe = shutil.which("ollama")
+    exe = find_ollama()
     if not exe:
-        log.error("ollama executable not found on PATH")
+        log.error("ollama executable not found")
         return False
     log.info("starting ollama serve")
     subprocess.Popen(
@@ -322,6 +360,9 @@ class App:
     def __init__(self):
         self.root = tk.Tk()
         self.root.withdraw()
+        self.root.report_callback_exception = (
+            lambda *exc: log.error("tk callback error:\n%s",
+                                   "".join(traceback.format_exception(*exc))))
         self.popup = Popup(self.root)
         self.toast = Toast(self.root)
         self.thinking_since = None
@@ -424,6 +465,10 @@ class App:
             if self.ready:
                 return
             if not ensure_ollama_server():
+                if not find_ollama():
+                    raise RuntimeError(
+                        "Ollama is not installed.\n"
+                        "Install it from https://ollama.com/download")
                 raise RuntimeError(
                     "Ollama server is not running and could not be started.")
             if not model_installed():
@@ -494,5 +539,12 @@ def single_instance():
 
 if __name__ == "__main__":
     if not single_instance():
+        log.info("another instance is already running, exiting")
+        ctypes.windll.user32.MessageBoxW(
+            None,
+            "MCQ Helper is already running in the background.\n\n"
+            "Ctrl+Shift+X = answer, Ctrl+Shift+Z = hide, Ctrl+Shift+Q = quit.\n"
+            "(Quit it first if you want to restart it.)",
+            "MCQ Helper", 0x40)
         sys.exit(0)
     App().run()
