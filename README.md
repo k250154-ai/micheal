@@ -28,19 +28,15 @@ Double-click `start.bat`, or run `pythonw mcq_helper.py`. The program runs in th
 
 | Hotkey | Action |
 | --- | --- |
-| `Ctrl+Shift+X` | Take a screenshot and show the answer popup (top-right corner) |
-| `Ctrl+Shift+/` | Show the live progress popup |
+| `Ctrl+Shift+X` | Capture a screenshot and prepare an answer without displaying any popup |
+| `Ctrl+Shift+.` | Show the live progress popup |
 | `Ctrl+Shift+'` | Show the latest answer popup |
 | `Ctrl+Shift+H` | Hide the answer, progress, and notification popups |
 | `Ctrl+Shift+Z` | Legacy hide shortcut |
 | `Ctrl+Shift+Q` | Quit |
 
-A small notification in the bottom-right corner tells you what the program is doing:
-
-- On start: "MCQ Helper is running in the background", with the hotkey list
-- While the model loads or downloads: loading message or download progress, then "Model ready"
-- After `Ctrl+Shift+X`: "Screenshot taken · Thinking… 5s", with a live timer until the answer appears
-- On `Ctrl+Shift+Q`: "MCQ Helper stopped"
+The app stays completely silent while starting, downloading, and thinking. Press
+`Ctrl+Shift+.` to view progress or `Ctrl+Shift+'` to view the latest answer.
 
 Logs and errors are written to `mcq_helper.log`. If the program crashes, a message box shows the error.
 

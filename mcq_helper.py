@@ -3,7 +3,7 @@ MCQ Helper - background screenshot -> Ollama vision model -> answer popup.
 
 Hotkeys
   Ctrl+Shift+X : take a screenshot, send it to the model, show the answer popup
-  Ctrl+Shift+/ : show the progress popup
+  Ctrl+Shift+. : show the progress popup
   Ctrl+Shift+' : show the latest answer
   Ctrl+Shift+H : hide every popup
   Ctrl+Shift+Z : legacy hide hotkey
@@ -82,7 +82,7 @@ except ImportError:
 MODEL = "gemma4:e4b"
 OLLAMA_URL = "http://127.0.0.1:11434"
 HOTKEY_CAPTURE = "ctrl+shift+x"
-HOTKEY_PROGRESS = "ctrl+shift+/"
+HOTKEY_PROGRESS = "ctrl+shift+."
 HOTKEY_LATEST = "ctrl+shift+'"
 HOTKEY_HIDE = "ctrl+shift+h"
 HOTKEY_HIDE_LEGACY = "ctrl+shift+z"
@@ -506,16 +506,12 @@ class App:
                     if kind == "answer":
                         self.latest_answer = data
                         self.progress_status = "Complete - answer ready"
-                        self.popup.show("Answer", data)
                     else:
                         self.progress_status = "Error - " + data
-                        self.popup.show("Error", data)
+                        if self.latest_answer is None:
+                            self.latest_answer = "Error: " + data
                 elif kind == "progress":
                     self.progress_status = data
-                elif kind == "toast":
-                    text, duration = data
-                    if self.thinking_since is None:  # don't hide the timer
-                        self.toast.show(text, duration)
                 elif kind == "quit":
                     self.shutdown()
                     return
@@ -552,7 +548,7 @@ class App:
         threading.Thread(target=self._worker, args=(img_b64,), daemon=True).start()
 
     def _tick_thinking(self):
-        """Update the 'thinking' toast once a second until the answer arrives."""
+        """Update silent progress state until the answer arrives."""
         if self.thinking_since is None:
             return
         secs = int(time.time() - self.thinking_since)
@@ -560,7 +556,6 @@ class App:
         status = f"Thinking{dots}  {secs}s"
         self.progress_status = status
         self.events.put(("progress", status))
-        self.toast.show(f"\U0001F4F8  Screenshot taken\n{status}")
         self.root.after(1000, self._tick_thinking)
 
     def _worker(self, img_b64):
@@ -608,29 +603,17 @@ class App:
     def _set_pull_status(self, text):
         self.pull_status = text
         self.events.put(("progress", text))
-        now = time.time()
-        if now - self._last_pull_toast >= 1:  # at most one update per second
-            self._last_pull_toast = now
-            self.toast_async(f"⬇  Downloading model\n{text}")
-
-    def toast_async(self, text, duration_ms=None):
-        """Show a toast from any thread."""
-        self.events.put(("toast", (text, duration_ms)))
 
     def background_init(self):
         try:
             self.events.put(("progress", "Checking Ollama and " + MODEL))
-            if not self.ready and ollama_running() and not model_installed():
-                self.toast_async("⬇  Model not found, starting download...")
             self.startup_checks()
             self.events.put(("progress", "Loading " + MODEL))
-            self.toast_async("⏳  Loading model into memory...")
             preload_model()
             self.events.put(("progress", "Ready - " + MODEL))
-            self.toast_async("✅  Model ready. Press Ctrl+Shift+X", 3000)
         except Exception as e:
             log.error("startup: %s", e)
-            self.toast_async(f"⚠  Startup problem:\n{e}", 6000)
+            self.events.put(("progress", "Startup problem - " + str(e)))
 
     def shutdown(self):
         log.info("quitting")
@@ -638,7 +621,6 @@ class App:
         self.thinking_since = None
         self.popup.hide()
         self.progress_popup.hide()
-        self.toast.show("MCQ Helper stopped")
         self.root.after(1200, self.root.destroy)
 
     def run(self):
@@ -648,7 +630,6 @@ class App:
         keyboard.add_hotkey(HOTKEY_HIDE, self.on_hide, suppress=False)
         keyboard.add_hotkey(HOTKEY_HIDE_LEGACY, self.on_hide, suppress=False)
         keyboard.add_hotkey(HOTKEY_QUIT, self.on_quit, suppress=False)
-        # Start loading after the startup toast so its hotkey list stays readable.
         self.root.after(
             4000,
             lambda: threading.Thread(target=self.background_init, daemon=True).start(),
@@ -657,11 +638,6 @@ class App:
                  "latest=%s hide=%s quit=%s",
                  MODEL, HOTKEY_CAPTURE, HOTKEY_PROGRESS, HOTKEY_LATEST,
                  HOTKEY_HIDE, HOTKEY_QUIT)
-        self.toast.show(
-            "✅  MCQ Helper is running in the background\n"
-            "X answer  •  / progress  •  ' latest  •  H hide  •  Q quit",
-            4000,
-        )
         self.root.after(50, self.poll)
         self.root.mainloop()
 
@@ -678,7 +654,7 @@ if __name__ == "__main__":
         ctypes.windll.user32.MessageBoxW(
             None,
             "MCQ Helper is already running in the background.\n\n"
-            "Ctrl+Shift+X = answer, Ctrl+Shift+/ = progress,\n"
+            "Ctrl+Shift+X = answer, Ctrl+Shift+. = progress,\n"
             "Ctrl+Shift+' = latest answer, Ctrl+Shift+H = hide,\n"
             "Ctrl+Shift+Q = quit.\n"
             "(Quit it first if you want to restart it.)",
